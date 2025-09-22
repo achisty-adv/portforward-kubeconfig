@@ -1,21 +1,26 @@
-# 🎯 Kubernetes Port-Forward Access Script
+# 📖 Granting Limited Kubernetes Access
 
-This script helps you generate a **restricted kubeconfig** that only allows developers to use  
-`kubectl port-forward` to access a service (e.g., PostgreSQL) inside Kubernetes.  
+This script creates a **ServiceAccount**, **Role**, and **RoleBinding** that grant developers **limited access** to Kubernetes.  
+It generates a dedicated **kubeconfig** file, allowing developers to:
 
-It does **not** give full cluster access — only the minimal permissions required.
+- 🔍 View pods and services  
+- 📜 View pod logs (`kubectl logs`)  
+- 🚪 Use `kubectl port-forward` to connect to services  
+
+All other actions (creating/deleting resources) are blocked.  
 
 ---
 
 ## ✨ Features
 
-- Creates a **ServiceAccount** in the target namespace  
-- Assigns a **minimal Role** with only:
-  - `get`, `list` on Services and Pods  
-  - `create` on `pods/portforward`  
+- Supports **one or multiple namespaces** in a single kubeconfig  
+- Creates a **minimal RBAC Role** for:
+  - `pods`, `services` → `get`, `list`  
+  - `pods/log` → `get`, `list`  
+  - `pods/portforward` → `create` 
 - Generates a **ServiceAccount token** (works with Kubernetes v1.24+)  
 - Builds a ready-to-use **kubeconfig file**  
-- Developers can only **port-forward** services — nothing else  
+- Generates kubeconfig with **separate contexts per namespace** (works with Kubernetes v1.24+)
 
 ---
 
@@ -28,14 +33,6 @@ It does **not** give full cluster access — only the minimal permissions requir
  kubectl config current-context
  ```
 
-You can run the script in **two ways**:  
-1. With **flags** (`--namespace`, `--sa-name`, `--outfile`)  
-2. With **positional arguments** (`$1 $2 $3`)  
-
-If no arguments are provided, the script uses defaults:
-- Namespace: `default`
-- ServiceAccount: `portforward-sa`
-- Output kubeconfig: `portforward.kubeconfig`
 
 ## 🆘 Help
 
@@ -46,19 +43,18 @@ You can get a quick usage instruction directly from the script:
 # or
 ./portforward-kubeconfig.sh -h
 ```
-### Arguments
+### ⚙️ xArguments
 
-You can pass options either with flags (`--namespace`, `--sa-name`, etc.) or as positional arguments (`$1`, `$2`, …).
+Arguments can be passed as flags:
 
-| Option            | Positional | Description                                    | Default                |
-|-------------------|------------|------------------------------------------------|------------------------|
-| `--namespace, -n` | `$1`       | Namespace where ServiceAccount will be created | `default`              |
-| `--sa-name`       | `$2`       | Name of the ServiceAccount                     | `portforward-sa`       |
-| `--outfile, -o`   | `$3`       | Output kubeconfig filename                     | `portforward.kubeconfig` |
+| Option            | Description                                    |
+|-------------------|------------------------------------------------|
+| `--namespace, -n` | One or more namespaces                         |
+| `--sa-name`       | Name of the ServiceAccount                     |
+| `--outfile, -o`   | Output kubeconfig filename                     |
 
-### 1. Examples of running a script
 
-#### ▶️ Using flags
+### ▶️ 1. Example of running a script
 
 ```bash
 ./portforward-kubeconfig.sh \
@@ -66,31 +62,22 @@ You can pass options either with flags (`--namespace`, `--sa-name`, etc.) or as 
   --sa-name db-portforward \
   --outfile devs.kubeconfig
 ```
-#### ▶️ Using positional arguments
+
+### 🔍  2. Verifying Access
+
+After creating devs.kubeconfig can be context switched and checked:
 
 ```bash
-./portforward-kubeconfig.sh database-backend db-portforward devs.kubeconfig
-```
-
-#### ▶️ With defaults
-```bash
-./portforward-kubeconfig.sh
-```
-
-### 2. Share kubeconfig with developers
-Developers can use the generated kubeconfig like this:
-
-```bash
-KUBECONFIG=devs.kubeconfig kubectl port-forward svc/backend-postgres-postgresql 30000:5432 -n database-backend
+kubectl --kubeconfig=devs.kubeconfig config get-contexts
+kubectl --kubeconfig=devs.kubeconfig config use-context staging-db 
+kubectl --kubeconfig=devs.kubeconfig get service -n staging-db get service
+kubectl --kubeconfig=devs.kubeconfig port-forward svc/backend-postgres-postgresql 30000:5432 -n database-backend
 ```
 Now the PostgreSQL service will be available locally at:
 
 ```Makefile
 localhost:30000
 ```
-
-
-## 🔍 Verifying Access
 
 You can test the generated kubeconfig to make sure it has **only the expected permissions**.
 
@@ -99,25 +86,28 @@ You can test the generated kubeconfig to make sure it has **only the expected pe
 These should work:
 
 ```bash
-KUBECONFIG=devs.kubeconfig kubectl get pods -n database-backend
-KUBECONFIG=devs.kubeconfig kubectl get svc -n database-backend
+kubectl --kubeconfig=devs.kubeconfig get pods -n database-backend
+kubectl --kubeconfig=devs.kubeconfig get svc -n database-backend
+kubectl --kubeconfig=devs.kubeconfig logs <pod-name>
 ```
 ### ❌ Forbidden commands
 
 The following commands **must fail** with `Error from server (Forbidden)`:
 
 ```bash
-KUBECONFIG=devs.kubeconfig kubectl logs <pod-name>
-KUBECONFIG=devs.kubeconfig kubectl exec -it <pod-name> -- sh
-KUBECONFIG=devs.kubeconfig kubectl apply -f some-deployment.yaml
+kubectl --kubeconfig=devs.kubeconfig exec -it <pod-name> -- sh
+kubectl --kubeconfig=devs.kubeconfig apply -f some-deployment.yaml
+kubectl --kubeconfig=devs.kubeconfig edit svc <service>
+kubectl --kubeconfig=devs.kubeconfig delete pod <pod>
 ```
 
 ## ✅ Benefits
 
 - No need to expose databases or services publicly  
-- Fine-grained RBAC permissions for safety  
+- Fine-grained RBAC permissions for safety
+- Works across multiple namespaces
 - Works with **Kubernetes 1.24+** (manual ServiceAccount token creation)  
-- Secure and auditable way to provide developers access  
+- Secure and auditable way to provide access  
 - Easy to automate and distribute with a single script  
 
 ---
